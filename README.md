@@ -20,28 +20,41 @@ further permission.
 
 ### Why this build exists
 
-Thorsten-Voice publishes PyTorch weights only. Converting them with sherpa-onnx's
-`scripts/kokoro/v1.0/export_onnx.py` fails on current PyTorch for two reasons:
+Thorsten-Voice publishes PyTorch weights only. Getting a *clean* ONNX out of them took
+four attempts; the traps are recorded so nobody repeats them:
 
-1. `Unknown number type: complex` — the vocoder's iSTFT uses complex tensors.
-2. `Unsupported: ONNX export of operator Unfold` — framing uses `unfold`.
+1. **Ringing.** kokoro's `TorchSTFT` uses `torch.istft` (complex tensors), which the
+   ONNX exporter cannot convert. Rewriting the STFT/iSTFT by hand *does* export — but
+   the result rings audibly during speech at 4800/9600 Hz (the iSTFT frame rate and
+   its harmonic): +11.8/+16.8 dB measured on a phone recording, versus +1.9/+0.4 dB in
+   PyTorch. That was the first release of this file (`kokoro-de-thorsten-ep5`, now
+   superseded). The fix is not to write an STFT at all: the `kokoro` package ships its
+   own ONNX-safe one — `KModel(disable_complex=True)` selects `CustomSTFT`. With it the
+   export measures +1.6/+3.4 dB, identical to PyTorch.
+2. **Silently half-loaded weights.** kokoro's loader misses this checkpoint's
+   `module.` prefix (DataParallel) and modern `parametrizations.weight.original0/1`
+   weight-norm names, and `load_state_dict(strict=False)` swallows both — 235 of the
+   decoder's 491 tensors load, the rest stay random, and the model emits white noise.
+   The export script translates the keys (548 tensors).
+3. **Training noise leaking into inference.** The vocoder's `torch.randn_like` /
+   `torch.rand` calls become `RandomNormalLike` nodes in ONNX: audible hiss, and the
+   same sentence renders differently on every run. Disabled; output is deterministic.
 
-Both are avoided by replacing `TorchSTFT.transform` / `.inverse` with real-valued
-equivalents (`conv1d` / `conv_transpose1d` overlap-add); unit-tested against
-`torch.stft` / `torch.istft` to a max difference of 3e-6.
+The export script (`export_thorsten_kokoro_onnx.py` in the consuming project) verifies
+all three before it will say "OK": ≥540 tensors loaded, deterministic output,
+9600 Hz peak < 8 dB, max deviation from PyTorch < 0.1.
 
-There is a third, quieter trap: `kokoro`'s loader silently loads only part of this
-checkpoint. The state dict carries a `module.` prefix (trained with DataParallel) and
-the modern `parametrizations.weight.original0/1` weight-norm names, while the package
-expects the legacy `weight_g`/`weight_v`; `load_state_dict(strict=False)` swallows
-both mismatches. The result is 235 of the decoder's 491 tensors loaded and the rest
-left random — the model then emits white noise rather than speech. The export script
-translates the keys (548 tensors loaded).
+### Releases
+
+| Asset | Status |
+|---|---|
+| `kokoro-de-thorsten-ep5-v2.tar.bz2` | **current** — CustomSTFT export, no ringing |
+| `kokoro-de-thorsten-ep5.tar.bz2` | superseded — hand-rolled STFT, rings at 9600 Hz; kept for reproducibility |
 
 ### Contents
 
 ```
-kokoro-de-thorsten-ep5/
+kokoro-de-thorsten-ep5-v2/
   model.onnx     325 MB   inputs: tokens [1,N] int64, style [1,256] float32, speed [1] float32
   voices.bin     522 KB   510 × 256 float32, little-endian (one speaker)
   tokens.txt     687 B    the standard Kokoro 178-token IPA vocabulary
