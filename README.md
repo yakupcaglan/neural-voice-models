@@ -49,7 +49,7 @@ all three before it will say "OK": ≥540 tensors loaded, deterministic output,
 | Asset | Status |
 |---|---|
 | `kokoro-de-thorsten-ep5-v2.tar.bz2` | **current** — CustomSTFT export, no ringing |
-| `kokoro-de-thorsten-ep5.tar.bz2` | superseded — hand-rolled STFT, rings at 9600 Hz; kept for reproducibility |
+| `kokoro-de-thorsten-ep5.tar.bz2` | removed — hand-rolled STFT, rang at 9600 Hz during speech; the export script above reproduces it only by reverting to the hand-rolled path, which nobody should do |
 
 ### Contents
 
